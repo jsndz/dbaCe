@@ -114,3 +114,10 @@ Notes:
 -input_length: The number of characters actually read from the input.
 -The getline function in C is used to read an entire line of text from a stream, typically from standard input
 -bytes_read holds the number of characters that getline has read from the input, including the newline character
+
+31/08/2024
+Phase 2: SQL compiler and virtual machine
+
+We need to convert whatever SQL code we get to byte code.
+The process as follows :
+SQL Command --> Tokenizer --> Parser --> Byte code --> Virtual Machine
