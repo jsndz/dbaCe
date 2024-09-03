@@ -121,3 +121,56 @@ Phase 2: SQL compiler and virtual machine
 We need to convert whatever SQL code we get to byte code.
 The process as follows :
 SQL Command --> Tokenizer --> Parser --> Byte code --> Virtual Machine
+
+3/9/2024
+
+When getting SQL command you need to check if it is a meta command like '.exit'
+so i used enum to represent the meta command and a do_meta_command function to execute them.
+`typedef enum
+{
+    META_COMMAND_SUCCESS,
+    META_COMMAND_UNRECOGNIZED_COMMAND
+} MetaCommandResult;
+MetaCommandResult do_meta_command(InputBuffer *input_buffer)
+{
+    if (strcmp(input_buffer->buffer, ".exit") == 0)
+    {
+        exit(EXIT_SUCCESS);
+    }
+    else
+    {
+        return META_COMMAND_UNRECOGNIZED_COMMAND;
+    }
+}`
+The other output we get is Actual sql statement. We need to divid the sql statement into what category belongs to.
+the category include DDL, DML and stuff.
+We take the statement and give type to it.
+`typedef enum
+{
+SELECT_STATEMENT,
+INSERT_STATEMENT
+} StatementType;
+
+typedef struct
+{
+StatementType type;
+} Statement;
+PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
+{
+if (strncmp(inputBuffer->buffer, "insert", 6) == 0)
+{
+statement->type = INSERT_STATEMENT;
+return PREPARE_SUCCESS;
+}
+else if (strncmp(inputBuffer->buffer, "select", 6) == 0)
+{
+statement->type = SELECT_STATEMENT;
+return PREPARE_SUCCESS;
+}
+else
+{
+return PREPARE_UNRECOGNIZED_COMMAND;
+}
+}`
+
+Then we do the execution of statement
