@@ -3,6 +3,23 @@
 #include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+#define COL_USERNAME_SIZE 32
+#define COL_EMAIL_SIZE 255
+// gives the size of attribute in the structure
+#define size_of_attribute(Struct, Attribute) sizeof(((Struct *)0)->Attribute)
+
+// size of inputs
+const uint32_t ID_SIZE = size_of_attribute(Row, id);
+const uint32_t EMAIL_SIZE = size_of_attribute(Row, email);
+const uint32_t USERNAME_SIZE = size_of_attribute(Row, userName);
+
+// Offset size
+const uint32_t ID_OFFSET = 0;
+const uint32_t USERNAME_OFFSET = ID_OFFSET + ID_SIZE;
+const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
+
 // structure for buffer input
 typedef struct
 {
@@ -16,11 +33,19 @@ typedef enum
     META_COMMAND_SUCCESS,
     META_COMMAND_UNRECOGNIZED_COMMAND
 } MetaCommandResult;
+// struct that represents the sytax of insert
+typedef struct
+{
+    uint32_t id;
+    char userName[COL_USERNAME_SIZE];
+    char email[COL_EMAIL_SIZE];
 
+} Row;
 typedef enum
 {
     PREPARE_SUCCESS,
-    PREPARE_UNRECOGNIZED_COMMAND
+    PREPARE_UNRECOGNIZED_COMMAND,
+    PREPARE_SYNTAX_ERROR
 } PrepareResult;
 typedef enum
 {
@@ -31,7 +56,9 @@ typedef enum
 typedef struct
 {
     StatementType type;
+    Row row_to_insert;
 } Statement;
+
 InputBuffer *
 new_input_buffer()
 {
@@ -82,6 +109,11 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
     if (strncmp(inputBuffer->buffer, "insert", 6) == 0)
     {
         statement->type = INSERT_STATEMENT;
+        int args_assigned = sscanf(inputBuffer->buffer, "insert %d %s %s", &(statement->row_to_insert.id), statement->row_to_insert.userName, statement->row_to_insert.email);
+        if (args_assigned < 3)
+        {
+            return PREPARE_SYNTAX_ERROR;
+        }
         return PREPARE_SUCCESS;
     }
     else if (strncmp(inputBuffer->buffer, "select", 6) == 0)
@@ -94,6 +126,7 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
         return PREPARE_UNRECOGNIZED_COMMAND;
     }
 }
+
 void executeStatement(Statement *statement)
 {
     switch (statement->type)
@@ -107,6 +140,7 @@ void executeStatement(Statement *statement)
         break;
     }
 }
+
 int main(int argc, int *argv)
 {
     InputBuffer *inputBuffer = new_input_buffer();
