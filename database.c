@@ -10,7 +10,7 @@
 // gives the size of attribute in the structure
 #define size_of_attribute(Struct, Attribute) sizeof(((Struct *)0)->Attribute)
 // compact representation of a row
-//  struct that represents the sytax of insert
+//  struct that represents the syntax of row
 typedef struct
 {
     uint32_t id;
