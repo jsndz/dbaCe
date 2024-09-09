@@ -9,7 +9,15 @@
 #define COL_EMAIL_SIZE 255
 // gives the size of attribute in the structure
 #define size_of_attribute(Struct, Attribute) sizeof(((Struct *)0)->Attribute)
+// compact representation of a row
+//  struct that represents the sytax of insert
+typedef struct
+{
+    uint32_t id;
+    char userName[COL_USERNAME_SIZE];
+    char email[COL_EMAIL_SIZE];
 
+} Row;
 // size of inputs
 const uint32_t ID_SIZE = size_of_attribute(Row, id);
 const uint32_t EMAIL_SIZE = size_of_attribute(Row, email);
@@ -19,6 +27,20 @@ const uint32_t USERNAME_SIZE = size_of_attribute(Row, userName);
 const uint32_t ID_OFFSET = 0;
 const uint32_t USERNAME_OFFSET = ID_OFFSET + ID_SIZE;
 const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
+const uint32_t ROW_SIZE = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE;
+
+//
+
+const uint32_t PAGE_SIZE = 4096;
+#define TABLE_MAX_PAGES 100
+const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
+const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
+
+typedef struct
+{
+    uint32_t num_rows;
+    void *pages[TABLE_MAX_PAGES];
+} Table;
 
 // structure for buffer input
 typedef struct
@@ -33,14 +55,7 @@ typedef enum
     META_COMMAND_SUCCESS,
     META_COMMAND_UNRECOGNIZED_COMMAND
 } MetaCommandResult;
-// struct that represents the sytax of insert
-typedef struct
-{
-    uint32_t id;
-    char userName[COL_USERNAME_SIZE];
-    char email[COL_EMAIL_SIZE];
 
-} Row;
 typedef enum
 {
     PREPARE_SUCCESS,
@@ -141,6 +156,31 @@ void executeStatement(Statement *statement)
     }
 }
 
+void serialize_row(Row *source, void *destination)
+{
+    memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
+    memcpy(destination + USERNAME_OFFSET, &(source->userName), USERNAME_SIZE);
+    memcpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
+}
+void deserialize_row(void *source, Row *destination)
+{
+    memcpy(&(destination->id), (source + ID_OFFSET), ID_SIZE);
+    memcpy(&(destination->userName), (source + USERNAME_OFFSET), USERNAME_SIZE);
+    memcpy(&(destination->email), (source + EMAIL_OFFSET), EMAIL_SIZE);
+}
+void row_slot(Table *table, uint32_t row_num)
+{
+    uint32_t page_num = row_num / ROWS_PER_PAGE;
+    void *page = table->pages[page_num];
+    if (page = NULL)
+    {
+        page = table->pages[page_num] = malloc(PAGE_SIZE);
+    }
+    uint32_t row_offset = row_num % ROWS_PER_PAGE;
+    uint32_t byte_offset = ROW_SIZE * row_offset;
+    return page + byte_offset;
+    // will give you the position of data(row) in a page
+}
 int main(int argc, int *argv)
 {
     InputBuffer *inputBuffer = new_input_buffer();
