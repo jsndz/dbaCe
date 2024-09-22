@@ -64,6 +64,12 @@ typedef enum
 } PrepareResult;
 typedef enum
 {
+    EXECUTE_SUCCESS,
+    EXECUTE_TABLE_FULL
+
+} ExecuteResult;
+typedef enum
+{
     SELECT_STATEMENT,
     INSERT_STATEMENT
 } StatementType;
@@ -83,12 +89,32 @@ new_input_buffer()
     input_buffer->input_length = 0;
     return input_buffer;
 }
-
+Table *new_table()
+{
+    Table *table = (Table *)malloc(sizeof(Table));
+    table->num_rows = 0;
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        table->pages[i] = NULL;
+    }
+    return table;
+}
+void free_table(Table *table)
+{
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        free(table->pages[i]);
+    }
+    free(table);
+}
 void print_prompt()
 {
     printf("db>");
 }
-
+void print_row(Row *row)
+{
+    printf("(%d,%s,%s)\n", row->id, row->userName, row->userName);
+}
 void read_input(InputBuffer *inputBuffer)
 {
     ssize_t bytes_read = getline(&(inputBuffer->buffer), &(inputBuffer->buffer_length), stdin);
@@ -141,15 +167,36 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
         return PREPARE_UNRECOGNIZED_COMMAND;
     }
 }
-
-void executeStatement(Statement *statement)
+ExecuteResult execute_insert(Statement *statement, Table *table)
+{
+    if (table->num_rows == TABLE_MAX_PAGES)
+    {
+        return EXECUTE_TABLE_FULL;
+    }
+    Row *row_to_insert = &(statement->row_to_insert);
+    serialize_row(row_to_insert, row_slot(table, table->num_rows));
+    table->num_rows += 1;
+    return EXECUTE_SUCCESS;
+}
+ExecuteResult execute_select(Statement *statement, Table *table)
+{
+    Row row;
+    for (uint32_t i = 0; i < table->num_rows; i++)
+    {
+        deserialize_row(row_slot(table, i), &row);
+    }
+    print_row(&(row));
+    return EXECUTE_SUCCESS;
+}
+ExecuteResult execute_statement(Statement *statement, Table *table)
 {
     switch (statement->type)
     {
     case SELECT_STATEMENT:
-        /* code */
+        execute_select(statement, table);
         break;
     case INSERT_STATEMENT:
+        execute_insert(statement, table);
         break;
     default:
         break;
@@ -168,7 +215,7 @@ void deserialize_row(void *source, Row *destination)
     memcpy(&(destination->userName), (source + USERNAME_OFFSET), USERNAME_SIZE);
     memcpy(&(destination->email), (source + EMAIL_OFFSET), EMAIL_SIZE);
 }
-void row_slot(Table *table, uint32_t row_num)
+void *row_slot(Table *table, uint32_t row_num)
 {
     uint32_t page_num = row_num / ROWS_PER_PAGE;
     void *page = table->pages[page_num];
@@ -181,8 +228,10 @@ void row_slot(Table *table, uint32_t row_num)
     return page + byte_offset;
     // will give you the position of data(row) in a page
 }
+
 int main(int argc, int *argv)
 {
+    Table *table = new_table();
     InputBuffer *inputBuffer = new_input_buffer();
     while (1)
     {
@@ -207,7 +256,15 @@ int main(int argc, int *argv)
         case PREPARE_UNRECOGNIZED_COMMAND:
             printf("Unrecognized command at the start %s \n", inputBuffer->buffer);
         }
-        executeStatement(&statement);
-        printf("Executed.\n");
+        switch (execute_statement(&statement, table))
+        {
+        case EXECUTE_SUCCESS:
+            printf("Executed.\n");
+            break;
+        case EXECUTE_TABLE_FULL:
+            printf("Table Full\n");
+        default:
+            break;
+        }
     }
 }
