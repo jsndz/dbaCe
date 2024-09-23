@@ -321,3 +321,90 @@ void *row_slot(Table *table, uint32_t row_num)
 ```
 
 ---
+
+23/09/2024
+
+For starters lets add functions to initialize and free the table.
+
+```c
+Table *new_table()
+{
+    Table *table = (Table *)malloc(sizeof(Table));
+    table->num_rows = 0;
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        table->pages[i] = NULL;
+    }
+    return table;
+}
+void free_table(Table *table)
+{
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        free(table->pages[i]);
+    }
+    free(table);
+}
+```
+
+The following function will be used to print the row:
+
+```c
+void print_row(Row *row)
+{
+    printf("(%d,%s,%s)\n", row->id, row->userName, row->email);
+}
+```
+
+Make a enum to define execution result
+
+```c
+typedef enum
+{
+    EXECUTE_SUCCESS,
+    EXECUTE_TABLE_FULL
+
+} ExecuteResult;
+```
+
+Now we need functions to execute the insert and select command
+For the insertion command
+
+```c
+ExecuteResult execute_insert(Statement *statement, Table *table)
+{
+    if (table->num_rows == TABLE_MAX_PAGES)
+    {
+        return EXECUTE_TABLE_FULL;
+    }
+    Row *row_to_insert = &(statement->row_to_insert);
+    serialize_row(row_to_insert, row_slot(table, table->num_rows));
+    table->num_rows += 1;
+    return EXECUTE_SUCCESS;
+}
+```
+
+we check if the number of rows ina table has been been maxed out
+then we insert the data to the table through serialize_row function
+
+```c
+ExecuteResult execute_select(Statement *statement, Table *table)
+{
+    Row row;
+    for (uint32_t i = 0; i < table->num_rows; i++)
+    {
+        deserialize_row(row_slot(table, i), &row);
+    }
+    print_row(&(row));
+    return EXECUTE_SUCCESS;
+}
+```
+
+We create a temporary Row (memory for row info) the add all the data in the table to the row
+
+We make changes in execute_statement and main funtions
+
+Notes:
+Having \* in front of a function return type indicates that the function returns a pointer to a particular data type.
+If a \* is there in the functions parameters it indicates that you need to pass address of the variable not the value of the variable.
+If you want to pass the address of the variable you can use &. Ex: &(your_variable);
