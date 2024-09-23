@@ -322,7 +322,9 @@ void *row_slot(Table *table, uint32_t row_num)
 
 ---
 
-23/09/2024
+## 23/09/2024
+
+### functions to initialize and free the table
 
 For starters lets add functions to initialize and free the table.
 
@@ -347,6 +349,8 @@ void free_table(Table *table)
 }
 ```
 
+### Print row
+
 The following function will be used to print the row:
 
 ```c
@@ -367,7 +371,10 @@ typedef enum
 } ExecuteResult;
 ```
 
-Now we need functions to execute the insert and select command
+Now we need functions to execute the insert and select command.
+
+### Insertion
+
 For the insertion command
 
 ```c
@@ -384,8 +391,10 @@ ExecuteResult execute_insert(Statement *statement, Table *table)
 }
 ```
 
-we check if the number of rows ina table has been been maxed out
-then we insert the data to the table through serialize_row function
+We check if the number of rows ina table has been been maxed out.
+Then we insert the data to the table through `serialize_row` function.
+
+### Selection
 
 ```c
 ExecuteResult execute_select(Statement *statement, Table *table)
@@ -400,11 +409,11 @@ ExecuteResult execute_select(Statement *statement, Table *table)
 }
 ```
 
-We create a temporary Row (memory for row info) the add all the data in the table to the row
+We create a temporary Row (memory for row info) the add all the data in the table to the row.
+We make changes in execute_statement and main funtions.
 
-We make changes in execute_statement and main funtions
+**Notes**:
 
-Notes:
-Having \* in front of a function return type indicates that the function returns a pointer to a particular data type.
-If a \* is there in the functions parameters it indicates that you need to pass address of the variable not the value of the variable.
-If you want to pass the address of the variable you can use &. Ex: &(your_variable);
+- Having \* in front of a function return type indicates that the function returns a pointer to a particular data type.
+- If a \* is there in the functions parameters it indicates that you need to pass address of the variable not the value of the variable.
+- If you want to pass the address of the variable you can use &. Ex: &(your_variable);
