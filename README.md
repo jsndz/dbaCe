@@ -8,3 +8,7 @@
 - [Notes](#notes)
 
 ### A detailed explaination is provided in the logs.md
+
+Here is the corrected README file based on the provided code and explanation:
+
+---
