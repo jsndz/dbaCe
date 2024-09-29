@@ -417,3 +417,75 @@ We make changes in execute_statement and main funtions.
 - Having \* in front of a function return type indicates that the function returns a pointer to a particular data type.
 - If a \* is there in the functions parameters it indicates that you need to pass address of the variable not the value of the variable.
 - If you want to pass the address of the variable you can use &. Ex: &(your_variable);
+
+## 29/09/2024
+
+### add additional 1 byte for "\0" in the Row email and username
+
+```c
+typedef struct
+{
+    uint32_t id;
+    char userName[COL_USERNAME_SIZE + 1];
+    char email[COL_EMAIL_SIZE + 1];
+    // additional 1 byte for "\0" in the string
+
+} Row;
+```
+
+### Better Parsing for insert
+
+In scanf if the string reading is larger than the buffer then it allocates the data in random places.
+So We want to check the length of each string before we copy it into a Row structure.
+So we use strtok() and strlen()
+First we will tokenize the statement and store it in variables.
+These variable include userName, id, email.
+The variables will be checked for NEGATIVE values and their length.
+
+```c
+typedef enum
+{
+    PREPARE_SUCCESS,
+    PREPARE_UNRECOGNIZED_COMMAND,
+    PREPARE_SYNTAX_ERROR,
+    PREPARE_NEGATIVE_ID,
+    PREPARE_STRING_IS_TOO_LONG
+} PrepareResult;
+PrepareResult prepare_insert(InputBuffer *input_buffer, Statement *statement)
+{
+    statement->type = INSERT_STATEMENT;
+    const *keyword = strtok(input_buffer->buffer, " ");
+    const *id_STRING = strtok(NULL, " ");
+    const *userName = strtok(NULL, " ");
+    const *email = strtok(NULL, " ");
+    if (id_STRING == NULL || userName == NULL || email == NULL)
+    {
+        return PREPARE_SYNTAX_ERROR;
+    }
+    int id = atoi(id_STRING);
+    if (id < 0)
+    {
+        return PREPARE_NEGATIVE_ID;
+    }
+    if (strlen(userName) < COL_USERNAME_SIZE)
+    {
+        return PREPARE_STRING_IS_TOO_LONG;
+    }
+    if (strlen(email) < COL_EMAIL_SIZE)
+    {
+        return PREPARE_STRING_IS_TOO_LONG;
+    }
+    statement->row_to_insert.id = id;
+    strcpy(statement->row_to_insert.userName, userName);
+    strcpy(statement->row_to_insert.email, email);
+    return PREPARE_SUCCESS;
+}
+```
+
+**Notes**:
+
+- `strtok()` is used in this case to split a string into smaller parts (tokens) based on a specified delimiter, which is a space (" ") in this project.
+- It replaces the space character with a null terminator ('\0').
+- Subsequent calls to `strtok()` with NULL as the first argument continue tokenizing the original string by finding the next delimiter and replacing it with a null terminator.
+- The way `strtok()` knows where it left off is by using an internal static pointer to track its position in the original string.
+- `strcpy()` does not copy the address of a string; it copies the contents
