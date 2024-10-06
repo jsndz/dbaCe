@@ -73,6 +73,7 @@ typedef enum
     PREPARE_UNRECOGNIZED_COMMAND,
     PREPARE_SYNTAX_ERROR,
     PREPARE_NEGATIVE_ID,
+    PREPARE_USRNAME_STRING_IS_TOO_LONG,
     PREPARE_STRING_IS_TOO_LONG
 } PrepareResult;
 typedef enum
@@ -102,8 +103,22 @@ new_input_buffer()
     input_buffer->input_length = 0;
     return input_buffer;
 }
-Pager *pager_open(const char filename)
+void serialize_row(Row *source, void *destination)
 {
+    memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
+    strncpy(destination + USERNAME_OFFSET, &(source->userName), USERNAME_SIZE);
+    strncpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
+}
+void deserialize_row(void *source, Row *destination)
+{
+    memcpy(&(destination->id), (source + ID_OFFSET), ID_SIZE);
+    memcpy(&(destination->userName), (source + USERNAME_OFFSET), USERNAME_SIZE);
+    memcpy(&(destination->email), (source + EMAIL_OFFSET), EMAIL_SIZE);
+}
+
+Pager *pager_open(const char *filename)
+{
+
     int fd = open(filename, O_RDWR | O_CREAT, S_IWUSR | S_IRUSR);
     if (fd == -1)
     {
@@ -122,6 +137,7 @@ Pager *pager_open(const char filename)
 }
 Table *db_open(const char *fileName)
 {
+
     Pager *pager = pager_open(fileName);
     uint32_t num_rows = pager->file_length / ROW_SIZE;
     Table *table = malloc(sizeof(table));
@@ -141,7 +157,7 @@ void *get_page(Pager *pager, uint32_t page_num)
     if (pager->pages[page_num] == NULL)
     {
         // cache miss
-        void *page = malloc(page);
+        void *page = malloc(PAGE_SIZE);
         uint32_t num_pages = pager->file_length / PAGE_SIZE;
         // page only has partial data
         if (pager->file_length % PAGE_SIZE)
@@ -286,10 +302,10 @@ void *row_slot(Table *table, uint32_t row_num)
 PrepareResult prepare_insert(InputBuffer *input_buffer, Statement *statement)
 {
     statement->type = INSERT_STATEMENT;
-    const *keyword = strtok(input_buffer->buffer, " ");
-    const *id_STRING = strtok(NULL, " ");
-    const *userName = strtok(NULL, " ");
-    const *email = strtok(NULL, " ");
+    const char *keyword = strtok(input_buffer->buffer, " ");
+    const char *id_STRING = strtok(NULL, " ");
+    const char *userName = strtok(NULL, " ");
+    const char *email = strtok(NULL, " ");
     if (id_STRING == NULL || userName == NULL || email == NULL)
     {
         return PREPARE_SYNTAX_ERROR;
@@ -299,11 +315,11 @@ PrepareResult prepare_insert(InputBuffer *input_buffer, Statement *statement)
     {
         return PREPARE_NEGATIVE_ID;
     }
-    if (strlen(userName) < COL_USERNAME_SIZE)
+    if (strlen(userName) >= COL_USERNAME_SIZE)
     {
-        return PREPARE_STRING_IS_TOO_LONG;
+        return PREPARE_USRNAME_STRING_IS_TOO_LONG;
     }
-    if (strlen(email) < COL_EMAIL_SIZE)
+    if (strlen(email) >= COL_EMAIL_SIZE)
     {
         return PREPARE_STRING_IS_TOO_LONG;
     }
@@ -316,7 +332,8 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
 {
     if (strncmp(inputBuffer->buffer, "insert", 6) == 0)
     {
-        prepare_insert(inputBuffer, statement);
+
+        return prepare_insert(inputBuffer, statement);
     }
     else if (strncmp(inputBuffer->buffer, "select", 6) == 0)
     {
@@ -330,6 +347,7 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
 }
 ExecuteResult execute_insert(Statement *statement, Table *table)
 {
+
     if (table->num_rows == TABLE_MAX_PAGES)
     {
         return EXECUTE_TABLE_FULL;
@@ -364,19 +382,6 @@ ExecuteResult execute_statement(Statement *statement, Table *table)
     }
 }
 
-void serialize_row(Row *source, void *destination)
-{
-    memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
-    memcpy(destination + USERNAME_OFFSET, &(source->userName), USERNAME_SIZE);
-    memcpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
-}
-void deserialize_row(void *source, Row *destination)
-{
-    memcpy(&(destination->id), (source + ID_OFFSET), ID_SIZE);
-    memcpy(&(destination->userName), (source + USERNAME_OFFSET), USERNAME_SIZE);
-    memcpy(&(destination->email), (source + EMAIL_OFFSET), EMAIL_SIZE);
-}
-
 int main(int argc, char *argv[])
 {
 
@@ -385,13 +390,14 @@ int main(int argc, char *argv[])
         printf("Need to enter the File name.\n");
         exit(EXIT_FAILURE);
     }
-    char *filename = argv[2];
+    char *filename = argv[1];
     Table *table = db_open(filename);
     InputBuffer *inputBuffer = new_input_buffer();
-    while (1)
+    while (true)
     {
         print_prompt();
         read_input(inputBuffer);
+
         if ((inputBuffer->buffer[0] == '.'))
         {
             switch (do_meta_command(inputBuffer, table))
@@ -407,12 +413,15 @@ int main(int argc, char *argv[])
         switch (prepare_statement(inputBuffer, &statement))
         {
         case PREPARE_SUCCESS:
-            break;
+
+            continue;
+
         case PREPARE_NEGATIVE_ID:
             printf("ID can't be negative.\n");
             continue;
         case PREPARE_UNRECOGNIZED_COMMAND:
             printf("Unrecognized command at the start %s \n", inputBuffer->buffer);
+            continue;
         case PREPARE_STRING_IS_TOO_LONG:
             printf("string is too long.\n");
             continue;
