@@ -489,3 +489,267 @@ PrepareResult prepare_insert(InputBuffer *input_buffer, Statement *statement)
 - Subsequent calls to `strtok()` with NULL as the first argument continue tokenizing the original string by finding the next delimiter and replacing it with a null terminator.
 - The way `strtok()` knows where it left off is by using an internal static pointer to track its position in the original string.
 - `strcpy()` does not copy the address of a string; it copies the contents
+
+## 11/10/2024
+
+### Phase 4: Persistent Database
+
+### We need to make the data persist. For now we are using a file to store the data.
+
+We will use pager abstraction to make it easier.
+Pager will store data if there is a cache miss the file in the disk will be searched.
+Pager acts as a page cache.
+
+```c
+typedef struct
+{
+    int file_descriptor;
+    uint32_t file_length;
+    void *pages[TABLE_MAX_PAGES];
+} Pager;
+```
+
+Add pager to the Table struct.
+
+### Function `pager_open()` will open the file with necessary permissions.
+
+```c
+Pager *pager_open(const char *filename)
+{
+
+    int fd = open(filename, O_RDWR | O_CREAT, S_IWUSR | S_IRUSR);
+    if (fd == -1)
+    {
+        printf("Unable to open the file.\n");
+        exit(EXIT_FAILURE);
+    }
+    off_t file_length = lseek(fd, 0, SEEK_END);
+    Pager *pager = malloc(sizeof(Pager));
+    pager->file_descriptor = fd;
+    pager->file_length = file_length;
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        pager->pages[i] = NULL;
+    }
+    return pager;
+}
+```
+
+It opens the file and stores the size of the file.
+
+**Notes:**
+
+- `open()` is a system call returns a non-negative integer if opened, which is the file descriptor (fd). If it fails, it returns -1.
+- A file descriptor is an integer that uniquely identifies an open file within a process
+- The `lseek()` function in C is used to move the file offset (the current position in the file) to a different location.
+- `lseek()` allows random access in files, meaning you can jump to any point in the file without reading through it sequentially.
+- `off_t lseek(int fd, off_t offset, int whence)`.
+- whence determines how the offset is applied.
+
+### Change `new_table()` to `db_open()` with initializing table and page structures and opening database.
+
+```c
+Table *db_open(const char *fileName)
+{
+
+    Pager *pager = pager_open(fileName);
+    uint32_t num_rows = pager->file_length / ROW_SIZE;
+    Table *table = malloc(sizeof(table));
+    table->pager = pager;
+    table->num_rows = num_rows;
+    return table;
+}
+```
+
+### We have a function `get_page()` that is logic for handling a cache miss.
+
+```c
+void *get_page(Pager *pager, uint32_t page_num)
+{
+    if (page_num > TABLE_MAX_PAGES)
+    {
+        printf("Tried to fetch page number out of bounds. %d > %d\n", page_num,
+               TABLE_MAX_PAGES);
+        exit(EXIT_FAILURE);
+    }
+
+    if (pager->pages[page_num] == NULL)
+    {
+        // cache miss
+        void *page = malloc(PAGE_SIZE);
+        uint32_t num_pages = pager->file_length / PAGE_SIZE;
+        // page only has partial data
+        if (pager->file_length % PAGE_SIZE)
+        {
+            num_pages += 1;
+        }
+        if (page_num <= num_pages)
+
+        {
+            lseek(pager->file_descriptor, page_num * PAGE_SIZE, SEEK_SET);
+            ssize_t bytes_read = read(pager->file_descriptor, page, PAGE_SIZE);
+            if (bytes_read == -1)
+            {
+                printf("Error reading file: %d\n", errno);
+                exit(EXIT_FAILURE);
+            }
+        }
+        pager->pages[page_num] = page;
+    }
+    return pager->pages[page_num];
+}
+```
+
+checks if the page number that is greate than max, then checks if the page is NULL if it is null then allocates the memory and stores the data from the memory.
+Also checks for partial page save.
+
+### When the user exits, we’ll call a new method called db_close()
+
+- flushes the page cache to disk
+- closes the database file
+- frees the memory for the Pager and Table data structures
+
+```c
+void *db_close(Table *table)
+{
+    Pager *pager = table->pager;
+    uint32_t num_full_pages = table->num_rows / ROWS_PER_PAGE;
+    for (uint32_t i = 0; i < num_full_pages; i++)
+    {
+        if (pager->pages[i] == NULL)
+        {
+            continue;
+        }
+        pager_flush(pager, i, PAGE_SIZE);
+        free(pager->pages[i]);
+        pager->pages[i] = NULL;
+    }
+
+    // if there is additional data
+    uint32_t num_additional_page = table->num_rows % ROWS_PER_PAGE;
+    if (num_additional_page >= 1)
+    {
+        uint32_t page_num = num_full_pages;
+        if (pager->pages[page_num] != NULL)
+        {
+            pager_flush(pager, page_num, num_additional_page * ROW_SIZE);
+            free(pager->pages[page_num]);
+            pager->pages[page_num] = NULL;
+        }
+    }
+    int result = close(pager->file_descriptor);
+    if (result == -1)
+    {
+        printf("error in clsoing.\n");
+        exit(EXIT_FAILURE);
+    }
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        void *page = pager->pages[i];
+        if (page)
+        {
+            free(page);
+            pager->pages[i] = NULL;
+        }
+    }
+    free(pager);
+    free(table);
+}
+```
+
+### `pager_flush()`, is responsible for writing a page from memory (the cache) back to the file on disk.
+
+The design currently keeps track of how many rows are in the database by the length of the file. Because of
+that, when writing the final page (which may be only partially filled), we have to write a "partial page"
+(i.e., not the full PAGE_SIZE) to the end of the file. This is why pager_flush() takes both a page_num and a
+size—the size specifies how many bytes of the page need to be written.
+
+```c
+void *pager_flush(Pager *pager, uint32_t page_num, uint32_t size)
+{
+    if (pager->pages[page_num] == NULL)
+    {
+        printf("tried to flush empty page");
+        exit(EXIT_FAILURE);
+    }
+    off_t offset = lseek(pager->file_descriptor, page_num * PAGE_SIZE, SEEK_SET);
+    if (offset == -1)
+    {
+        printf("Error seeking.\n");
+        exit(EXIT_FAILURE);
+    }
+    ssize_t bytes_written = write(pager->file_descriptor, pager->pages[page_num], size);
+    if (bytes_written == -1)
+    {
+        printf("error in writing.\n");
+        exit(EXIT_FAILURE);
+    }
+}
+```
+
+The data from the pager is flushed to the memory by `write()` function.
+
+Also change the main function:
+
+```c
+int main(int argc, char *argv[])
+{
+
+    if (argc < 2)
+    {
+        printf("Need to enter the File name.\n");
+        exit(EXIT_FAILURE);
+    }
+    char *filename = argv[1];
+    Table *table = db_open(filename);
+    InputBuffer *inputBuffer = new_input_buffer();
+    while (true)
+    {
+        print_prompt();
+        read_input(inputBuffer);
+
+        if ((inputBuffer->buffer[0] == '.'))
+        {
+            switch (do_meta_command(inputBuffer, table))
+            {
+            case (META_COMMAND_SUCCESS):
+                continue;
+            case (META_COMMAND_UNRECOGNIZED_COMMAND):
+                printf("Unrecognized command '%s'\n", inputBuffer->buffer);
+                continue;
+            }
+        }
+        Statement statement;
+        switch (prepare_statement(inputBuffer, &statement))
+        {
+        case PREPARE_SUCCESS:
+
+            break;
+
+        case PREPARE_NEGATIVE_ID:
+            printf("ID can't be negative.\n");
+            continue;
+        case PREPARE_UNRECOGNIZED_COMMAND:
+            printf("Unrecognized command at the start %s \n", inputBuffer->buffer);
+            continue;
+        case PREPARE_STRING_IS_TOO_LONG:
+            printf("string is too long.\n");
+            continue;
+        case PREPARE_SYNTAX_ERROR:
+            printf("Syntax error. Could not parse statement.\n");
+            continue;
+        }
+        switch (execute_statement(&statement, table))
+        {
+        case EXECUTE_SUCCESS:
+            printf("Executed.\n");
+            break;
+        case EXECUTE_TABLE_FULL:
+            printf("Table Full\n");
+        }
+    }
+}
+```
+
+When running the file with the ./a.out command add the file name.
+For example : `./a.out db.db`

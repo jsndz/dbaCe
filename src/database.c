@@ -152,8 +152,9 @@ void *get_page(Pager *pager, uint32_t page_num)
     {
         printf("Tried to fetch page number out of bounds. %d > %d\n", page_num,
                TABLE_MAX_PAGES);
+        exit(EXIT_FAILURE);
     }
-    exit(EXIT_FAILURE);
+
     if (pager->pages[page_num] == NULL)
     {
         // cache miss
@@ -164,6 +165,8 @@ void *get_page(Pager *pager, uint32_t page_num)
         {
             num_pages += 1;
         }
+
+        // Logic of loading data from the disk
         if (page_num <= num_pages)
 
         {
@@ -348,10 +351,11 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
 ExecuteResult execute_insert(Statement *statement, Table *table)
 {
 
-    if (table->num_rows == TABLE_MAX_PAGES)
+    if (table->num_rows >= TABLE_MAX_ROWS)
     {
         return EXECUTE_TABLE_FULL;
     }
+
     Row *row_to_insert = &(statement->row_to_insert);
     serialize_row(row_to_insert, row_slot(table, table->num_rows));
     table->num_rows += 1;
@@ -363,8 +367,9 @@ ExecuteResult execute_select(Statement *statement, Table *table)
     for (uint32_t i = 0; i < table->num_rows; i++)
     {
         deserialize_row(row_slot(table, i), &row);
+        print_row(&(row));
     }
-    print_row(&(row));
+
     return EXECUTE_SUCCESS;
 }
 ExecuteResult execute_statement(Statement *statement, Table *table)
@@ -414,7 +419,7 @@ int main(int argc, char *argv[])
         {
         case PREPARE_SUCCESS:
 
-            continue;
+            break;
 
         case PREPARE_NEGATIVE_ID:
             printf("ID can't be negative.\n");
@@ -436,8 +441,6 @@ int main(int argc, char *argv[])
             break;
         case EXECUTE_TABLE_FULL:
             printf("Table Full\n");
-        default:
-            break;
         }
     }
 }

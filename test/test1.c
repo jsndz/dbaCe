@@ -1,5 +1,5 @@
 #include <criterion/criterion.h>
-Test(sample, test1)
-{
-    cr_assert_eq(2 + 2, 4, "Expected 2 + 2 to equal 4");
-}
+
+// i have no idea how to do testing so i wont be doing it for now
+//  i tried with criterion for c
+//  but i felt too complecated by it
