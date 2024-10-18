@@ -19,12 +19,6 @@
 
 typedef struct
 {
-    Table *table;
-    uint32_t row_num;
-    bool end_of_table;
-} Cursor;
-typedef struct
-{
     uint32_t id;
     char userName[COL_USERNAME_SIZE + 1];
     char email[COL_EMAIL_SIZE + 1];
@@ -59,7 +53,12 @@ typedef struct
     uint32_t num_rows;
     Pager *pager;
 } Table;
-
+typedef struct
+{
+    Table *table;
+    uint32_t row_num;
+    bool end_of_table;
+} Cursor;
 // structure for buffer input
 typedef struct
 {
@@ -328,7 +327,7 @@ void *cursor_value(Cursor *cursor)
     return page + byte_offset;
     // will give you the position of data(row) in a page
 }
-void *cursor_advance(Cursor *cursor)
+void cursor_advance(Cursor *cursor)
 {
     cursor->row_num += 1;
 
@@ -386,13 +385,14 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
 ExecuteResult execute_insert(Statement *statement, Table *table)
 {
 
-    Cursor *cursor = table_end(table);
     if (table->num_rows >= TABLE_MAX_ROWS)
     {
         return EXECUTE_TABLE_FULL;
     }
 
     Row *row_to_insert = &(statement->row_to_insert);
+    print_row(row_to_insert);
+    Cursor *cursor = table_end(table);
     serialize_row(row_to_insert, cursor_value(cursor));
     table->num_rows += 1;
     free(cursor);
@@ -403,9 +403,9 @@ ExecuteResult execute_select(Statement *statement, Table *table)
     Cursor *cursor = table_start(table);
     Row row;
 
-    while (cursor->end_of_table != true)
+    while (!(cursor->end_of_table))
     {
-        deserialize_row(cursor->table, &(row));
+        deserialize_row(cursor_value(cursor), &(row));
         print_row(&(row));
         cursor_advance(cursor);
     }

@@ -753,3 +753,117 @@ int main(int argc, char *argv[])
 
 When running the file with the ./a.out command add the file name.
 For example : `./a.out db.db`
+
+## 18/10/2024
+
+### Phase 5: Cursor Abstraction
+
+### We add cursor for:
+
+- Create a cursor at the beginning of the table
+- Create a cursor at the end of the table
+- Access the row the cursor is pointing to
+- Advance the cursor to the next row
+
+### Cursor Structure:
+
+```c
+typedef struct
+{
+    Table *table;
+    uint32_t row_num;
+    bool end_of_table;// represents if the the cursor is at the end
+} Cursor;
+```
+
+### To move cursor to the starting of the table:
+
+```c
+Cursor *table_start(Table *table)
+{
+    Cursor *cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->row_num = 0;
+    cursor->end_of_table = (table->num_rows == 0);
+
+    return cursor;
+}
+```
+
+### To move cursor to the end of the table:
+
+```c
+Cursor *table_end(Table *table)
+{
+    Cursor *cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->row_num = table->num_rows;
+    cursor->end_of_table = true;
+    return cursor;
+}
+
+```
+
+### change the `row_slot()` function so that it can return the row which the cursor is pointing to:
+
+```c
+void *cursor_value(Cursor *cursor)
+{
+    uint32_t row_num = cursor->row_num;
+    uint32_t page_num = row_num / ROWS_PER_PAGE;
+    void *page = get_page(cursor->table->pager, page_num);
+    uint32_t row_offset = row_num % ROWS_PER_PAGE;
+    uint32_t byte_offset = ROW_SIZE * row_offset;
+    return page + byte_offset;
+    // will give you the position of data(row) in a page
+}
+```
+
+### To go to the next row with the cursor
+
+```c
+void cursor_advance(Cursor *cursor)
+{
+    cursor->row_num += 1;
+
+    if (cursor->row_num >= cursor->table->num_rows)
+    {
+        cursor->end_of_table = true;
+    }
+}
+```
+
+### Change the `execut_select()` and `execute_insert()` functions to manage the cursor
+
+```c
+ExecuteResult execute_insert(Statement *statement, Table *table)
+{
+
+    if (table->num_rows >= TABLE_MAX_ROWS)
+    {
+        return EXECUTE_TABLE_FULL;
+    }
+
+    Row *row_to_insert = &(statement->row_to_insert);
+    print_row(row_to_insert);
+    Cursor *cursor = table_end(table);
+    serialize_row(row_to_insert, cursor_value(cursor));
+    table->num_rows += 1;
+    free(cursor);
+    return EXECUTE_SUCCESS;
+}
+ExecuteResult execute_select(Statement *statement, Table *table)
+{
+    Cursor *cursor = table_start(table);
+    Row row;
+
+    while (!(cursor->end_of_table))
+    {
+        deserialize_row(cursor_value(cursor), &(row));
+        print_row(&(row));
+        cursor_advance(cursor);
+    }
+
+    return EXECUTE_SUCCESS;
+}
+```
