@@ -48,7 +48,6 @@ typedef struct
 typedef struct
 {
     uint32_t root_page_num;
-
     Pager *pager;
 } Table;
 typedef struct
@@ -131,26 +130,42 @@ const uint32_t LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_
 
 uint32_t *leaf_node_num_cells(void *node)
 {
+    // returns a pointer to the number of cells(key - value pairs) stored in a leaf node of a B - tree.
     return node + LEAF_NODE_NUM_CELLS_OFFSET;
 }
 void *leaf_node_cell(void *node, uint32_t cell_num)
 {
-    return node + LEAF_NODE_HEADER_SIZE + cell_num + LEAF_NODE_CELL_SIZE;
+    // location of the leaf node
+    return node + LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE;
 }
 uint32_t *leaf_node_key(void *node, uint32_t cell_num)
 {
+    // location of the leaf node key
     return leaf_node_cell(node, cell_num);
 }
 void *leaf_node_value(void *node, uint32_t cell_num)
 {
+    // location of the leaf node value
     return leaf_node_cell(node, cell_num) + LEAF_NODE_KEY_SIZE;
 }
 void *initialize_leaf_node(void *node)
 {
+    // create a  leaf node
     *leaf_node_num_cells(node) = 0;
 }
+void print_constants()
+{
+    printf("Constants:\n");
+    printf("ROW_SIZE: %d\n", ROW_SIZE);
+    printf("COMMON_NODE_HEADER_SIZE: %d\n", COMMON_NODE_HEADER_SIZE);
+    printf("LEAF_NODE_HEADER_SIZE: %d\n", LEAF_NODE_HEADER_SIZE);
+    printf("LEAF_NODE_CELL_SIZE: %d\n", LEAF_NODE_CELL_SIZE);
+    printf("LEAF_NODE_SPACE_FOR_CELLS: %d\n", LEAF_NODE_SPACE_FOR_CELLS);
+    printf("LEAF_NODE_MAX_CELLS: %d\n", LEAF_NODE_MAX_CELLS);
+}
 
-Cursor *table_start(Table *table)
+Cursor *
+table_start(Table *table)
 {
     Cursor *cursor = malloc(sizeof(Cursor));
     cursor->table = table;
@@ -221,16 +236,6 @@ Pager *pager_open(const char *filename)
     }
     return pager;
 }
-Table *db_open(const char *fileName)
-{
-
-    Pager *pager = pager_open(fileName);
-    uint32_t num_rows = pager->file_length / ROW_SIZE;
-    Table *table = malloc(sizeof(table));
-    table->pager = pager;
-    table->num_rows = num_rows;
-    return table;
-}
 
 void *get_page(Pager *pager, uint32_t page_num)
 {
@@ -271,6 +276,40 @@ void *get_page(Pager *pager, uint32_t page_num)
         }
     }
     return pager->pages[page_num];
+}
+Table *db_open(const char *fileName)
+{
+
+    Pager *pager = pager_open(fileName);
+    Table *table = malloc(sizeof(table));
+    table->pager = pager;
+    table->root_page_num = 0;
+    if (pager->num_pages == 0)
+    {
+        // New DB file.
+        void *root_node = get_page(pager, 0);
+        initialize_leaf_node(root_node);
+    }
+    return table;
+}
+void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
+{
+    void *node = get_page(cursor->table->pager, cursor->page_num);
+    uint32_t num_cells = leaf_node_num_cells(node);
+    if (num_cells >= LEAF_NODE_MAX_CELLS)
+    {
+        printf("Need to implement a split ");
+        exit(EXIT_FAILURE);
+    }
+    if (cursor->cell_num < num_cells)
+    {
+        for (uint32_t i = num_cells; i > cursor->cell_num; i--)
+        {
+            memcpy(leaf_node_cell(i), leaf_node_cell(i - 1), LEAF_NODE_CELL_SIZE);
+        }
+    }
+    *(leaf_node_key(node, cursor->cell_num)) = key;
+    serialize_row(row, leaf_node_value(node, cursor->cell_num));
 }
 void *pager_flush(Pager *pager, uint32_t page_num)
 {
@@ -357,13 +396,33 @@ void close_input_buffer(InputBuffer *inputBuffer)
     free(inputBuffer->buffer);
     free(inputBuffer);
 }
-
+void print_leaf_node(void *node)
+{
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    printf("leaf (size %d)\n", num_cells);
+    for (uint32_t i = 0; i < num_cells; i++)
+    {
+        uint32_t key = *leaf_node_key(node, i);
+        printf("  - %d : %d\n", i, key);
+    }
+}
 MetaCommandResult do_meta_command(InputBuffer *input_buffer, Table *table)
 {
     if (strcmp(input_buffer->buffer, ".exit") == 0)
     {
         db_close(table);
         exit(EXIT_SUCCESS);
+    }
+    else if (strcmp(input_buffer->buffer, ".constants") == 0)
+    {
+        print_constants();
+        return META_COMMAND_SUCCESS;
+    }
+    else if (strcmp(input_buffer->buffer, ".btree") == 0)
+    {
+        printf("Tree:\n");
+        print_leaf_node(get_page(table->pager, 0));
+        return META_COMMAND_SUCCESS;
     }
     else
     {
@@ -436,8 +495,8 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
 }
 ExecuteResult execute_insert(Statement *statement, Table *table)
 {
-
-    if (table->num_rows >= TABLE_MAX_ROWS)
+    void *node = get_page(table->pager, table->root_page_num);
+    if (*(leaf_node_num_cells(node)) >= LEAF_NODE_MAX_CELLS)
     {
         return EXECUTE_TABLE_FULL;
     }
@@ -445,8 +504,7 @@ ExecuteResult execute_insert(Statement *statement, Table *table)
     Row *row_to_insert = &(statement->row_to_insert);
     print_row(row_to_insert);
     Cursor *cursor = table_end(table);
-    serialize_row(row_to_insert, cursor_value(cursor));
-    table->num_rows += 1;
+    leaf_node_insert(cursor, row_to_insert->id, row_to_insert);
     free(cursor);
     return EXECUTE_SUCCESS;
 }

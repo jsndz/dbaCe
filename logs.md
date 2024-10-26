@@ -867,3 +867,6 @@ ExecuteResult execute_select(Statement *statement, Table *table)
     return EXECUTE_SUCCESS;
 }
 ```
+
+Internal nodes will point to their children by storing the page number that stores the child.
+The btree asks the pager for a particular page number and gets back a pointer into the page cache
