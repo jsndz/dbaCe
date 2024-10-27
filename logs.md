@@ -870,3 +870,241 @@ ExecuteResult execute_select(Statement *statement, Table *table)
 
 Internal nodes will point to their children by storing the page number that stores the child.
 The btree asks the pager for a particular page number and gets back a pointer into the page cache
+
+## 27/10/2024
+
+### Phase 6: B-tree Implementation
+
+### Why B-tree?
+
+A B-tree is a self-balancing search tree used for storing sorted data.
+Btree provides better insertion, deletion and retrieval.
+
+|                   | Unsorted Array of Rows | Sorted Array of Rows | Tree of Nodes                    |
+| ----------------- | ---------------------- | -------------------- | -------------------------------- |
+| **Pages contain** | Only data              | Only data            | Metadata, primary keys, and data |
+| **Rows per page** | More                   | More                 | Fewer                            |
+| **Insertion**     | O(1)                   | O(n)                 | O(log(n))                        |
+| **Deletion**      | O(n)                   | O(n)                 | O(log(n))                        |
+| **Lookup by ID**  | O(n)                   | O(log(n))            | O(log(n))                        |
+
+There are 2 types of node in a btree.
+
+```c
+typedef enum { NODE_INTERNAL, NODE_LEAF } NodeType;
+```
+
+Each Node will be a page.
+Pages are stored in the database file one after the other in order of page number.
+Every node has metadata.
+The metadata in a B-tree node is stored at the beginning of the page as part of the node header.
+Internal Node holds the pointer for children node.
+
+### Components of an Internal Node:
+
+1. **Node Type**:
+
+   - Similar to leaf nodes, internal nodes also store a **node type** to indicate whether the node is internal or a leaf. This allows the system to distinguish between internal and leaf nodes during operations.
+
+2. **Is Root**:
+
+   - A flag that indicates whether this internal node is the root of the tree.
+
+3. **Parent Pointer**:
+
+   - A pointer to the parent node of the current internal node, useful for navigating up the tree.
+
+4. **Number of Keys**:
+
+   - A count of how many keys are stored in the internal node. These keys are used to direct searches and separate ranges of child nodes.
+
+5. **Keys**:
+
+   - An array of keys that help guide the search. Each key acts as a boundary to decide which child node to follow during a search.
+
+6. **Child Pointers**:
+   - An array of pointers (or references) to child nodes. The number of child pointers is usually one more than the number of keys, as each key separates a range of children.
+
+### Node Layout
+
+```c
+
+// common NODE header Constants
+const uint32_t NODE_TYPE_SIZE = sizeof(uint32_t);
+const uint32_t NODE_TYPE_OFFSSET = 0;
+const uint32_t IS_ROOT_SIZE = sizeof(uint32_t);
+const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE;
+const uint32_t PARENT_POINTER_SIZE = sizeof(uint32_t);
+const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_SIZE + IS_ROOT_OFFSET;
+const uint8_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+
+// Leaf Node header constants
+const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = COMMON_NODE_HEADER_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+
+// Leaf node body constants
+const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_KEY_OFFSET = 0;
+const uint32_t LEAF_NODE_VALUE_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_VALUE_OFFSSET = 0;
+const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
+const uint32_t LEAF_NODE_CELL_SIZE = LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE;
+const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
+const uint32_t LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+
+```
+
+1. **NODE Constants**: These constants define the structure of the common part of a node.
+
+   - `NODE_TYPE_SIZE`: This is the size (in bytes) of a field that stores the node's type, which is 4 bytes (since it's a `uint32_t`).
+   - `NODE_TYPE_OFFSET`: This is the starting position of the `NODE_TYPE` field in the node, which is at the beginning (offset 0).
+   - `IS_ROOT_SIZE`: This defines the size of a field that stores whether the node is the root of the tree. Again, it's 4 bytes.
+   - `IS_ROOT_OFFSET`: This is where the `IS_ROOT` field starts, right after the `NODE_TYPE` field.
+   - `PARENT_POINTER_SIZE`: This is the size of a field (also 4 bytes) that stores a pointer to the parent node.
+   - `PARENT_POINTER_OFFSET`: The offset of the `PARENT_POINTER` field, which is after the `IS_ROOT` field.
+   - `COMMON_NODE_HEADER_SIZE`: The total size of the common part of the node, which includes the `NODE_TYPE`, `IS_ROOT`, and `PARENT_POINTER` fields.
+
+2. **Leaf Node Constants**: These constants define the structure for a leaf node, which stores actual data.
+
+   - `LEAF_NODE_NUM_CELLS_SIZE`: The size (4 bytes) of a field that stores how many cells (data entries) are in the leaf node.
+   - `LEAF_NODE_NUM_CELLS_OFFSET`: The position of the `LEAF_NODE_NUM_CELLS` field, right after the common node header.
+   - `LEAF_NODE_HEADER_SIZE`: The total size of the leaf node header, which is the size of the common node header plus the size of the `LEAF_NODE_NUM_CELLS` field.
+
+3. **Leaf Node Body Constants**:
+   - `LEAF_NODE_KEY_SIZE`: This is the size (4 bytes, since it's a `uint32_t`) for storing the key in a leaf node.
+   - `LEAF_NODE_KEY_OFFSET`: The starting position of the key field in each cell, which is set to 0 (i.e., the key comes first).
+   - `LEAF_NODE_VALUE_SIZE`: This is the size (4 bytes) for storing the value associated with the key.
+   - `LEAF_NODE_VALUE_OFFSET`: The starting position of the value field in each cell, which is right after the key. It’s calculated as `LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE`.
+   - `LEAF_NODE_CELL_SIZE`: This is the total size of one cell (or entry) in the leaf node, which includes both the key and the value (`LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE`).
+   - `LEAF_NODE_SPACE_FOR_CELLS`: This is the amount of space available for storing cells (key-value pairs) in the leaf node. It’s calculated as the total page size (`PAGE_SIZE`) minus the space taken by the leaf node header (`LEAF_NODE_HEADER_SIZE`).
+   - `LEAF_NODE_MAX_CELLS`: This is the maximum number of cells (key-value pairs) that can fit in a leaf node. It’s calculated by dividing the available space for cells by the size of a single cell (`LEAF_NODE_CELL_SIZE`).
+
+### To access the leaf node we use these pointer functions:
+
+```c
+
+uint32_t *leaf_node_num_cells(void *node)
+{
+    // returns a pointer to the number of cells(key - value pairs) stored in a leaf node of a B - tree.
+    return node + LEAF_NODE_NUM_CELLS_OFFSET;
+}
+void *leaf_node_cell(void *node, uint32_t cell_num)
+{
+    // location of the leaf node
+    return node + LEAF_NODE_HEADER_SIZE + cell_num * LEAF_NODE_CELL_SIZE;
+}
+uint32_t *leaf_node_key(void *node, uint32_t cell_num)
+{
+    // location of the leaf node key
+    return leaf_node_cell(node, cell_num);
+}
+void *leaf_node_value(void *node, uint32_t cell_num)
+{
+    // location of the leaf node value
+    return leaf_node_cell(node, cell_num) + LEAF_NODE_KEY_SIZE;
+}
+void *initialize_leaf_node(void *node)
+{
+    // create a  leaf node
+    *leaf_node_num_cells(node) = 0;
+}
+```
+
+### In summary:
+
+- **`leaf_node_num_cells`** accesses the number of cells in the node.
+- **`leaf_node_cell`** finds the memory location of a specific cell (key-value pair).
+- **`leaf_node_key`** retrieves the key from a cell.
+- **`leaf_node_value`** retrieves the value from a cell.
+- **`initialize_leaf_node`** initializes the leaf node by setting the number of cells to zero.
+
+### change pager and table
+
+Every node is going to take up exactly one page, even if it’s not full.
+By having each node in the B-tree correspond to exactly one page, the database system can achieve a simplified, more efficient architecture that enhances performance, reduces complexity, and maintains consistency. This design choice streamlines various operations, making the overall system easier to implement and maintain.
+So change `pager_flush()` and `db_close()` functions.
+
+```c
+void *pager_flush(Pager *pager, uint32_t page_num)
+{
+    if (pager->pages[page_num] == NULL)
+    {
+        printf("tried to flush empty page");
+        exit(EXIT_FAILURE);
+    }
+    off_t offset = lseek(pager->file_descriptor, page_num * PAGE_SIZE, SEEK_SET);
+    if (offset == -1)
+    {
+        printf("Error seeking.\n");
+        exit(EXIT_FAILURE);
+    }
+    ssize_t bytes_written = write(pager->file_descriptor, pager->pages[page_num], PAGE_SIZE);
+    if (bytes_written == -1)
+    {
+        printf("error in writing.\n");
+        exit(EXIT_FAILURE);
+    }
+}
+void *db_close(Table *table)
+{
+    Pager *pager = table->pager;
+    for (uint32_t i = 0; i < pager->num_pages; i++)
+    {
+        if (pager->pages[i] == NULL)
+        {
+            continue;
+        }
+        pager_flush(pager, i);
+        free(pager->pages[i]);
+        pager->pages[i] = NULL;
+    }
+
+    int result = close(pager->file_descriptor);
+    if (result == -1)
+    {
+        printf("error in clsoing.\n");
+        exit(EXIT_FAILURE);
+    }
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++)
+    {
+        void *page = pager->pages[i];
+        if (page)
+        {
+            free(page);
+            pager->pages[i] = NULL;
+        }
+    }
+    free(pager);
+    free(table);
+}
+```
+
+### Number of pages instead of rows
+
+Since each page has fixed number of rows it is easier to search for row in a page rather than searching for row in specific.
+And b-tree is self balancing tree so it will be in a sorted order.
+Storing the number of pages aligns with how data is organized, accessed, and managed in a B-tree. It simplifies physical storage management, enables efficient paging, and aligns with the B-tree structure's needs without requiring a potentially complex row count mechanism.
+
+```c
+typedef struct
+{
+    int file_descriptor;
+    uint32_t file_length;
+    uint32_t num_pages;
+    void *pages[TABLE_MAX_PAGES];
+} Pager;
+typedef struct
+{
+    uint32_t root_page_num;
+    Pager *pager;
+} Table;
+```
+
+Change `get_page()` and `pager_open()` accordingly.
+
+**Notes :**
+
+- data in the database file is stored in B-tree format directly on disk, meaning the structure of the B-tree is persisted.
+- When the database needs to perform an operation (e.g., a search, insert, or delete), it uses the pager to load pages from the disk (database file) into RAM.
+- In a B-tree structure, each page (which represents a node) is connected to other pages via page numbers stored within internal nodes. These page numbers act like pointers but are disk-based references instead of in-memory addresses.
