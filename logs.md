@@ -1227,3 +1227,147 @@ ExecuteResult execute_insert(Statement *statement, Table *table)
 - data in the database file is stored in B-tree format directly on disk, meaning the structure of the B-tree is persisted.
 - When the database needs to perform an operation (e.g., a search, insert, or delete), it uses the pager to load pages from the disk (database file) into RAM.
 - In a B-tree structure, each page (which represents a node) is connected to other pages via page numbers stored within internal nodes. These page numbers act like pointers but are disk-based references instead of in-memory addresses.
+
+## 04/11/2024
+
+### Phase 7: Binary Search
+
+For insertion we implementing it at the end of the table. But it is better to search the tree to find the correct place then insert the value.
+
+Create a function `leaf_node_find()` to find the leaf node using binary search.
+
+```c
+rsor *leaf_node_find(Table *table, uint32_t page_num, uint32_t key)
+{
+    void *node = get_page(table->pager, page_num);
+    uint32_t num_cells = *(leaf_node_num_cells(node));
+
+    Cursor *cursor = (malloc(sizeof(Cursor)));
+    cursor->table = table;
+    cursor->page_num = page_num;
+
+    // binary search
+    uint32_t low = 0;
+    uint32_t high = num_cells;
+    while (high != low)
+    {
+        uint32_t mid = (high + low) / 2;
+        uint32_t mid_key = *leaf_node_key(node, mid);
+        if (mid_key == key)
+        {
+            cursor->cell_num = mid;
+            return cursor;
+        }
+        else if (mid_key > key)
+        {
+            high = mid - 1;
+        }
+        else
+        {
+            low = mid + 1;
+        }
+    }
+    cursor->cell_num = mid;
+    return cursor;
+}
+```
+
+Use the fuction for finding the key position and insert.
+
+```c
+ExecuteResult execute_insert(Statement *statement, Table *table)
+{
+    void *node = get_page(table->pager, table->root_page_num);
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    if (num_cells >= LEAF_NODE_MAX_CELLS)
+    {
+        return EXECUTE_TABLE_FULL;
+    }
+
+    Row *row_to_insert = &(statement->row_to_insert);
+    uint32_t key_to_insert = row_to_insert->id;
+    Cursor *cursor = table_find();
+    if (cursor->cell_num < num_cells)
+    {
+        uint32_t key_at_index = leaf_node_key(node, cursor->cell_num);
+        if (key_at_index == key_to_insert)
+        {
+            return EXECUTE_DUPLICATE_KEY;
+        }
+    }
+    leaf_node_insert(cursor, row_to_insert->id, row_to_insert);
+    free(cursor);
+    return EXECUTE_SUCCESS;
+}
+
+Cursor *table_find(Table *table, uint32_t key)
+{
+    uint32_t root_page_num = table->root_page_num;
+    void *root_node = get_page(table->pager, root_page_num);
+    if (get_node_type(root_node) == NODE_LEAF)
+    {
+        return leaf_node_find(table, root_page_num, key);
+    }
+    else
+    {
+        printf("Need to implement searching an internal node\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+Cursor *leaf_node_find(Table *table, uint32_t page_num, uint32_t key)
+{
+    void *node = get_page(table->pager, page_num);
+    uint32_t num_cells = *(leaf_node_num_cells(node));
+
+    Cursor *cursor = (malloc(sizeof(Cursor)));
+    cursor->table = table;
+    cursor->page_num = page_num;
+
+    // binary search
+    uint32_t low = 0;
+    uint32_t high = num_cells;
+    while (high != low)
+    {
+        uint32_t mid = (high + low) / 2;
+        uint32_t mid_key = *leaf_node_key(node, mid);
+        if (mid_key == key)
+        {
+            cursor->cell_num = mid;
+            return cursor;
+        }
+        else if (mid_key > key)
+        {
+            high = mid - 1;
+        }
+        else
+        {
+            low = mid + 1;
+        }
+    }
+    cursor->cell_num = mid;
+    return cursor;
+}
+
+```
+
+These functions returns node type or change node type.
+
+```c
+NodeType get_node_type(void *node)
+{
+    uint32_t value = *((uint8_t *)(node + NODE_TYPE_OFFSSET));
+    return (NodeType)value;
+}
+void set_node_type(void *node, NodeType type)
+{
+    uint8_t value = key;
+    *((uint8_t *)(node + NODE_TYPE_OFFSSET)) = value;
+}
+```
+
+**Notes:**
+
+- The * in *leaf_node_num_cells(node) is a dereference operator. The `leaf_node_num_cells()` originally returns the address of the variable but now it returns the value.
+- In `Cursor* table_find(Table* table, uint32_t key)`
+  the \* indicates that the function table_find returns a pointer to a Cursor type.
