@@ -1371,3 +1371,20 @@ void set_node_type(void *node, NodeType type)
 - The * in *leaf_node_num_cells(node) is a dereference operator. The `leaf_node_num_cells()` originally returns the address of the variable but now it returns the value.
 - In `Cursor* table_find(Table* table, uint32_t key)`
   the \* indicates that the function table_find returns a pointer to a Cursor type.
+
+## 04/11/2024
+
+### Phase 8: Node Splitting
+
+### rules of btree
+
+- the leaf nodes should be on same level
+- every node has min and max number of keys
+- max we choose min=max/2
+- root node is exception
+
+## what if there is a too many keys
+
+consideer max =4 , 7,18,24,35,45
+we take min 2 and max 2 keys and make a seperate node for max keys
+and the middle key will be appended to the upper node
