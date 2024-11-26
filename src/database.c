@@ -138,11 +138,11 @@ const uint32_t INTERNAL_NODE_RIGHT_CHILD_OFFSET =
     INTERNAL_NODE_NUM_KEYS_OFFSET + INTERNAL_NODE_NUM_KEYS_SIZE;
 const uint32_t INTERNAL_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE +
                                            +INTERNAL_NODE_NUM_KEYS_SIZE +
-                                           +INTERNAL_NODE_RIGHT_CHILD_SIZE;
+                                           INTERNAL_NODE_RIGHT_CHILD_SIZE;
 const uint32_t INTERNAL_NODE_KEY_SIZE = sizeof(uint32_t);
 const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(uint32_t);
 const uint32_t INTERNAL_NODE_CELL_SIZE =
-    +INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE;
+    INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE;
 
 const uint32_t LEAF_NODE_LEFT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT;
 uint32_t *leaf_node_num_cells(void *node)
@@ -178,6 +178,7 @@ void set_root_node(void *node, bool is_root)
 void *initialize_leaf_node(void *node)
 {
     // create a  leaf node
+    memset(node, 0, PAGE_SIZE);
     set_node_type(node, NODE_LEAF);
     *leaf_node_num_cells(node) = 0;
     set_root_node(node, false);
@@ -190,9 +191,9 @@ uint32_t *internal_node_num_key(void *node)
 }
 void *initialize_internal_node(void *node)
 {
+    memset(node, 0, PAGE_SIZE);
     set_node_type(node, NODE_INTERNAL);
     set_root_node(node, false);
-
     *internal_node_num_key(node) = 0;
 }
 
@@ -228,6 +229,7 @@ uint32_t *internal_node_key(void *node, uint32_t key_num)
 NodeType get_node_type(void *node)
 {
     uint32_t value = *((uint8_t *)(node + NODE_TYPE_OFFSSET));
+
     return (NodeType)value;
 }
 
@@ -245,7 +247,7 @@ uint32_t get_node_max_key(void *node)
 bool is_root_node(void *node)
 {
     uint8_t value = *((uint32_t *)(node + IS_ROOT_OFFSET));
-    return (bool)value;
+    return value != 0;
 }
 void *get_page(Pager *pager, uint32_t page_num)
 {
@@ -290,34 +292,32 @@ void *get_page(Pager *pager, uint32_t page_num)
 Cursor *leaf_node_find(Table *table, uint32_t page_num, uint32_t key)
 {
     void *node = get_page(table->pager, page_num);
-    uint32_t num_cells = *(leaf_node_num_cells(node));
-
-    Cursor *cursor = (malloc(sizeof(Cursor)));
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    Cursor *cursor = malloc(sizeof(Cursor));
     cursor->table = table;
     cursor->page_num = page_num;
-
-    // binary search
-    uint32_t low = 0;
-    uint32_t high = num_cells;
-    while (high != low)
+    // Binary search
+    uint32_t min_index = 0;
+    uint32_t one_past_max_index = num_cells;
+    while (one_past_max_index != min_index)
     {
-        uint32_t mid = (high + low) / 2;
-        uint32_t mid_key = *leaf_node_key(node, mid);
-        if (mid_key == key)
+        uint32_t index = (min_index + one_past_max_index) / 2;
+        uint32_t key_at_index = *leaf_node_key(node, index);
+        if (key == key_at_index)
         {
-            cursor->cell_num = mid;
+            cursor->cell_num = index;
             return cursor;
         }
-        else if (mid_key > key)
+        if (key < key_at_index)
         {
-            high = mid - 1;
+            one_past_max_index = index;
         }
         else
         {
-            low = mid + 1;
+            min_index = index + 1;
         }
     }
-
+    cursor->cell_num = min_index;
     return cursor;
 }
 
@@ -341,9 +341,32 @@ table_start(Table *table)
     cursor->page_num = table->root_page_num;
     void *root_node = get_page(table->pager, table->root_page_num);
     uint32_t num_cells = *leaf_node_num_cells(root_node);
+
     cursor->end_of_table = (num_cells == 0);
     return cursor;
 }
+Cursor *internal_node_find(Table *table, uint32_t page_num, uint32_t key)
+{
+    void *node = get_page(table->pager, page_num);
+    uint32_t num_keys = *internal_node_num_key(node);
+    uint32_t min_index = 0;
+    uint32_t max_index = num_keys;
+    while (max_index != min_index)
+    {
+        uint32_t index = (min_index + max_index) / 2;
+        uint32_t key_to_right = *internal_node_key(node, index);
+
+        if (key < key_to_right)
+        {
+            max_index = index;
+        }
+        else
+        {
+            min_index = index + 1;
+        }
+    }
+}
+
 Cursor *table_find(Table *table, uint32_t key)
 {
     uint32_t root_page_num = table->root_page_num;
@@ -354,8 +377,7 @@ Cursor *table_find(Table *table, uint32_t key)
     }
     else
     {
-        printf("Need to implement searching an internal node\n");
-        exit(EXIT_FAILURE);
+        return internal_node_find(table, root_page_num, key);
     }
 }
 InputBuffer *
@@ -410,7 +432,7 @@ Table *db_open(const char *fileName)
 {
 
     Pager *pager = pager_open(fileName);
-    Table *table = malloc(sizeof(table));
+    Table *table = malloc(sizeof(Table));
     table->pager = pager;
     table->root_page_num = 0;
     if (pager->num_pages == 0)
@@ -453,7 +475,7 @@ void *leaf_node_split_and_insert(Cursor *cursor, uint32_t key, Row *value)
     void *new_node = get_page(cursor->table->pager, new_page_num);
     initialize_leaf_node(new_node);
 
-    for (uint32_t i = LEAF_NODE_MAX_CELLS; i >= 0; i--)
+    for (int32_t i = LEAF_NODE_MAX_CELLS; i >= 0; i--)
     {
         void *destination_node;
 
@@ -626,6 +648,7 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t indentation_level)
     {
     case NODE_LEAF:
         num_keys = *leaf_node_num_cells(node);
+        printf("%d hh", num_keys);
         indent(indentation_level);
         printf("-leaf (size %d)\n", num_keys);
         for (uint32_t i = 0; i < num_keys; i++)
@@ -729,6 +752,7 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
     }
     else if (strncmp(inputBuffer->buffer, "select", 6) == 0)
     {
+
         statement->type = SELECT_STATEMENT;
         return PREPARE_SUCCESS;
     }
@@ -761,14 +785,19 @@ ExecuteResult execute_select(Statement *statement, Table *table)
 {
     Cursor *cursor = table_start(table);
     Row row;
-
+    printf("N");
     while (!(cursor->end_of_table))
     {
-        deserialize_row(cursor_value(cursor), &(row));
-        print_row(&(row));
-        cursor_advance(cursor);
-    }
 
+        printf("1");
+        deserialize_row(cursor_value(cursor), &(row));
+        printf("2");
+        print_row(&(row));
+        printf("3");
+        cursor_advance(cursor);
+        printf("4");
+    }
+    printf("M");
     return EXECUTE_SUCCESS;
 }
 ExecuteResult execute_statement(Statement *statement, Table *table)

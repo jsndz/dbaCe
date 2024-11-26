@@ -1385,6 +1385,6 @@ void set_node_type(void *node, NodeType type)
 
 ## what if there is a too many keys
 
-consideer max =4 , 7,18,24,35,45
+consider max =4 , 7,18,24,35,45
 we take min 2 and max 2 keys and make a seperate node for max keys
 and the middle key will be appended to the upper node
