@@ -1135,7 +1135,6 @@ Cursor *table_end(Table *table)
     cursor->page_num = table->root_page_num;
     void *root_node = get_page(table->pager, table->root_page_num);
     uint32_t num_cells = *leaf_node_num_cells(root_node);
-
     cursor->cell_num = num_cells;
     cursor->end_of_table = true;
     return cursor;
@@ -1186,25 +1185,34 @@ Table *db_open(const char *fileName)
 function for inserting value
 
 ```c
-void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value)
-{
+void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value) {
+    // Step 1: Get a pointer to the page (node) where the insertion will happen
     void *node = get_page(cursor->table->pager, cursor->page_num);
+
+    // Step 2: Find the current number of cells (rows) in the leaf node
     uint32_t num_cells = leaf_node_num_cells(node);
-    if (num_cells >= LEAF_NODE_MAX_CELLS)
-    {
-        printf("Need to implement a split ");
-        exit(EXIT_FAILURE);
+
+    // Step 3: Check if the node is full
+    if (num_cells >= LEAF_NODE_MAX_CELLS) {
+        printf("Need to implement a split");
+        exit(EXIT_FAILURE);  // Stop execution for now
     }
-    if (cursor->cell_num < num_cells)
-    {
-        for (uint32_t i = num_cells; i > cursor->cell_num; i--)
-        {
-            memcpy(leaf_node_cell(i), leaf_node_cell(i - 1), LEAF_NODE_CELL_SIZE);
+
+    // Step 4: Make space for the new cell, if necessary
+    // If the insertion position is not at the end, shift existing cells to the right
+    if (cursor->cell_num < num_cells) {
+        for (uint32_t i = num_cells; i > cursor->cell_num; i--) {
+            memcpy(leaf_node_cell(node, i), leaf_node_cell(node, i - 1), LEAF_NODE_CELL_SIZE);
         }
     }
+
+    // Step 5: Write the key to the cell at the insertion position
     *(leaf_node_key(node, cursor->cell_num)) = key;
-    serialize_row(row, leaf_node_value(node, cursor->cell_num));
+
+    // Step 6: Write the row data to the corresponding cell
+    serialize_row(value, leaf_node_value(node, cursor->cell_num));
 }
+
 ExecuteResult execute_insert(Statement *statement, Table *table)
 {
     void *node = get_page(table->pager, table->root_page_num);
@@ -1387,7 +1395,12 @@ void set_node_type(void *node, NodeType type)
 
 consider max =4 , 7,18,24,35,45
 we take min 2 and max 2 keys and make a seperate node for max keys
+Left Leaf Node: [ (7, Row7), (18, Row18) ]
+Right Leaf Node: [ (24, Row24), (35, Row35), (45, Row45) ]
 and the middle key will be appended to the upper node
+Internal Node: [ 24 ]
+Left Pointer → Left Leaf Node: [ (7, Row7), (18, Row18) ]
+Right Pointer → Right Leaf Node: [ (24, Row24), (35, Row35), (45, Row45) ]
 
 ## Splitting Algorithm
 
@@ -1639,32 +1652,182 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t indentation_level)
 ```c
 Cursor *internal_node_find(Table *table, uint32_t page_num, uint32_t key)
 {
+    // Fetch the current internal node
     void *node = get_page(table->pager, page_num);
+
+    // Get the number of keys in the internal node
     uint32_t num_keys = *internal_node_num_key(node);
+
+    // Initialize binary search bounds
     uint32_t min_index = 0;
     uint32_t max_index = num_keys;
+
+    // Binary search to find the correct child
     while (max_index != min_index)
     {
+        // Check the middle key
         uint32_t index = (min_index + max_index) / 2;
         uint32_t key_to_right = *internal_node_key(node, index);
 
+        // Adjust search bounds based on comparison
         if (key < key_to_right)
         {
-            max_index = index;
+            max_index = index; // Key is in the left range
         }
         else
         {
-            min_index = index + 1;
+            min_index = index + 1; // Key is in the right range
         }
     }
+
+    // Find the child node corresponding to the key range
     uint32_t child_num = *internal_node_child(node, min_index);
     void *child = get_page(table->pager, child_num);
+
+    // Recursively search based on the child node type
     switch (get_node_type(child))
     {
     case NODE_LEAF:
+        // If the child is a leaf node, search within it
         return leaf_node_find(table, child_num, key);
     case NODE_INTERNAL:
+        // If the child is an internal node, continue recursively
         return internal_node_find(table, child_num, key);
+    }
+}
+
+
+```
+
+## 03-01-2024
+
+### Scanning a Multi-Level B-Tree Sequentially
+
+We can scan the whole tree by just using internal node but when scanning a table sequentially, moving from one leaf node to the next using a next_leaf pointer is faster than going back up to the parent (internal node) to find the next leaf.
+
+## Change the code `table_start()` code to indicate the leaf nde intead of root node.
+
+```c
+Cursor *table_start(Table *table)
+{
+    Cursor *cursor = table_find(table, 0);
+    void *node = get_page(table->pager, cursor->page_num);
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    cursor->end_of_table = (num_cells == 0);
+    return cursor;
+}
+
+
+```
+
+## New header and functions for NEXT leaf node sequential search
+
+```c
+const uint32_t LEAF_NODE_NEXT_LEAF_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_NEXT_LEAF_OFFSET =
+    LEAF_NODE_NUM_CELLS_OFFSET + LEAF_NODE_NUM_CELLS_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE + LEAF_NODE_NEXT_LEAF_SIZE;
+
+
+uint32_t *leaf_node_next_leaf(void *node)
+{
+    return node + LEAF_NODE_NEXT_LEAF_OFFSET;
+}
+
+```
+
+## Advacing Cursor using sequential Search
+
+```c
+void cursor_advance(Cursor *cursor)
+{
+    uint32_t page_num = cursor->page_num;
+    void *node = get_page(cursor->table->pager, page_num);
+    cursor->cell_num += 1;
+
+    if (cursor->cell_num >= (*leaf_node_num_cells(node)))
+    {
+        uint32_t next_page_num = *leaf_node_next_leaf(node);
+        if (next_page_num == 0)
+        {
+            cursor->end_of_table = true;
+        }
+        else
+        {
+            cursor->page_num = next_page_num;
+            cursor->cell_num = 0;
+        }
+    }
+}
+
+```
+
+Changes in `leaf_node_split_and_insert()`:
+
+```c
+void *leaf_node_split_and_insert(Cursor *cursor, uint32_t key, Row *value)
+{
+    // get old node
+    void *old_node = get_page(cursor->table->pager, cursor->page_num);
+    // at the end of the page create new node
+    uint32_t new_page_num = get_unused_pages(cursor->table->pager);
+    void *new_node = get_page(cursor->table->pager, new_page_num);
+    initialize_leaf_node(new_node);
+    *leaf_node_next_leaf(new_node) = *leaf_node_next_leaf(old_node);
+    *leaf_node_next_leaf(old_node) = new_page_num;
+
+    for (int32_t i = LEAF_NODE_MAX_CELLS; i >= 0; i--)
+    {
+        void *destination_node;
+
+        // get the destination where to go
+        // if the node is bigger than the middle one then should go to right node
+        if (i >= LEAF_NODE_LEFT_SPLIT_COUNT)
+        {
+            destination_node = new_node;
+        }
+        else
+        {
+            destination_node = old_node;
+        }
+        // to get the index within node
+        // if it is the biggest id node it should go to right most on new node
+        uint32_t index_within_node = i % LEAF_NODE_LEFT_SPLIT_COUNT;
+        // eg: if the max is 4 and 5 elements are there the biggest will be in 5 % 2 ==1 so rightmost
+        void *destination = leaf_node_cell(destination_node, index_within_node);
+        if (i == cursor->cell_num)
+        {
+            serialize_row(value, leaf_node_value(destination_node, index_within_node));
+            *leaf_node_key(destination_node, index_within_node) = key;
+        }
+        else if (i > cursor->cell_num)
+        {
+            memcpy(destination, leaf_node_cell(old_node, i - 1), LEAF_NODE_CELL_SIZE);
+        }
+        else
+        {
+            memcpy(destination, leaf_node_cell(old_node, i), LEAF_NODE_CELL_SIZE);
+        }
+
+        /*
+        Loop each cell
+        Split the cells based on the its old node poisition
+        find index within the old or new node
+        find the destination node cell
+        if the node is the same on as the cursor is pointing to just serialize row
+        if not copy them to old node or new node
+        */
+        *(leaf_node_num_cells(old_node)) = LEAF_NODE_LEFT_SPLIT_COUNT;
+        *(leaf_node_num_cells(new_node)) = LEAF_NODE_RIGHT_SPLIT_COUNT;
+        if (is_root_node(old_node))
+        {
+            return create_new_root_node(cursor->table, new_page_num);
+        }
+        else
+        {
+            printf("Need to implement update root");
+            exit(EXIT_FAILURE);
+        }
     }
 }
 

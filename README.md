@@ -1,5 +1,10 @@
 # Building a sqlite with C
 
+The Flow goes like this  
+Cursor->table->pager->file
+Each node is a page
+And each cell(key-value pair) is a row accept for internal node which point to another node
+
 ## Table of Contents
 
 - [Phase 1: REPL Interface](#phase-1-repl-interface)
