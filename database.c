@@ -34,6 +34,7 @@ const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
 const uint32_t ROW_SIZE = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE;
 
 const uint32_t PAGE_SIZE = 4096;
+
 #define TABLE_MAX_PAGES 100
 typedef struct
 {
@@ -85,8 +86,8 @@ typedef enum
 } ExecuteResult;
 typedef enum
 {
-    STATEMENT_SELECT,
-    STATEMENT_INSERT
+    SELECT_STATEMENT,
+    INSERT_STATEMENT
 } StatementType;
 
 typedef struct
@@ -651,6 +652,8 @@ void leaf_node_split_and_insert(Cursor *cursor, uint32_t key, Row *value)
         */
         *(leaf_node_num_cells(old_node)) = LEAF_NODE_LEFT_SPLIT_COUNT;
         *(leaf_node_num_cells(new_node)) = LEAF_NODE_RIGHT_SPLIT_COUNT;
+        // if the old node(the initial node) was a root node
+        // we need a new root node that points to the old node and new right node
         if (is_root_node(old_node))
         {
             return create_new_root_node(cursor->table, new_page_num);
@@ -846,23 +849,26 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t indentation_level)
 {
     void *node = get_page(pager, page_num);
     uint32_t num_keys, child;
+
     switch (get_node_type(node))
     {
     case NODE_LEAF:
         num_keys = *leaf_node_num_cells(node);
-        printf("%d hh", num_keys);
         indent(indentation_level);
-        printf("-leaf (size %d)\n", num_keys);
+        printf("- leaf (size %d)\n", num_keys);
+
         for (uint32_t i = 0; i < num_keys; i++)
         {
             indent(indentation_level + 1);
-            printf("- %d", *leaf_node_key(node, i));
+            printf("- %d\n", *leaf_node_key(node, i));
         }
         break;
+
     case NODE_INTERNAL:
         num_keys = *internal_node_num_key(node);
         indent(indentation_level);
-        printf("-internal (size %d)\n", num_keys);
+        printf("- internal (size %d)\n", num_keys);
+
         if (num_keys > 0)
         {
             for (uint32_t i = 0; i < num_keys; i++)
@@ -870,10 +876,11 @@ void print_tree(Pager *pager, uint32_t page_num, uint32_t indentation_level)
                 child = *internal_node_child(node, i);
                 print_tree(pager, child, indentation_level + 1);
             }
-            break;
         }
+        break;
     }
 }
+
 MetaCommandResult do_meta_command(InputBuffer *input_buffer, Table *table)
 {
     if (strcmp(input_buffer->buffer, ".exit") == 0)
@@ -926,7 +933,7 @@ void cursor_advance(Cursor *cursor)
 }
 PrepareResult prepare_insert(InputBuffer *input_buffer, Statement *statement)
 {
-    statement->type = STATEMENT_INSERT;
+    statement->type = INSERT_STATEMENT;
     const char *keyword = strtok(input_buffer->buffer, " ");
     const char *id_STRING = strtok(NULL, " ");
     const char *username = strtok(NULL, " ");
@@ -963,7 +970,7 @@ PrepareResult prepare_statement(InputBuffer *inputBuffer, Statement *statement)
     else if (strncmp(inputBuffer->buffer, "select", 6) == 0)
     {
 
-        statement->type = STATEMENT_SELECT;
+        statement->type = SELECT_STATEMENT;
         return PREPARE_SUCCESS;
     }
     else
@@ -1014,10 +1021,10 @@ ExecuteResult execute_statement(Statement *statement, Table *table)
 {
     switch (statement->type)
     {
-    case STATEMENT_SELECT:
+    case SELECT_STATEMENT:
         execute_select(statement, table);
         break;
-    case STATEMENT_INSERT:
+    case INSERT_STATEMENT:
         execute_insert(statement, table);
         break;
     default:
