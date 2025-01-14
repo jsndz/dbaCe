@@ -2003,7 +2003,10 @@ void create_new_root_node(Table *table, uint32_t right_child_page_num)
 
 ## `internal_node_find()` code
 
+`internal_node_find_child()` will give the index where you can insert the child pointer not the child pointer itself
+
 ```c
+
 uint32_t internal_node_find_child(void *node, uint32_t key)
 {
 
@@ -2031,6 +2034,7 @@ uint32_t internal_node_find_child(void *node, uint32_t key)
 
 Cursor *internal_node_find(Table *table, uint32_t key, uint32_t page_num)
 {
+
     void *node = get_page(table->pager, page_num);
     uint32_t child_index = internal_node_find_child(node, key);
     uint32_t child_num = *internal_node_child(node, child_index);
@@ -2048,21 +2052,41 @@ Cursor *internal_node_find(Table *table, uint32_t key, uint32_t page_num)
 }
 ```
 
+Consider :
+Keys: [20, 40]
+Children: [Child1, Child2, RightChild]
+RightChild Key: 60
+
+Now i have to insert node Child3 which is lesser than 60 but greater than 40
+Take the max key of the child3.
+i have to move RightChild to 1 position right
+And insert the the Child3 here.
+Then add 50 to the keys.
+
+Keys: [20, 40, 50]
+Children: [Child1, Child2, Child3, RightChild]
+RightChild Key: 60
+
 ```c
 void internal_node_insert(Table *table, uint32_t parent_page_num, uint32_t child_page_num)
 {
+    //in the above example Keys: [20, 40] -->is parent
+    //Child3 is the child
     void *parent = get_page(table->pager, parent_page_num);
     void *child = get_page(table->pager, child_page_num);
     uint32_t child_max_key = get_node_max_key(table->pager, child);
     uint32_t index = internal_node_find_child(parent, child_max_key);
+    //internal_node_find_child will give the index where you can insert the child pointer not the child pointer itself
     uint32_t original_num_keys = *internal_node_num_key(parent);
     if (original_num_keys >= INTERNAL_NODE_MAX_KEYS)
     {
+        //if the size of the num_keys exceed the max limit
         internal_node_split_and_insert(table, parent_page_num, child_page_num);
         return;
     }
 
     uint32_t right_child_page_num = *internal_node_right_child(parent);
+    //If the right child pointer of the parent is invalid this is the first child being added so just set the right child pointer to the new child and return.
     if (right_child_page_num == INVALID_PAGE_NUM)
     {
         *internal_node_right_child(parent) = child_page_num;
@@ -2070,15 +2094,25 @@ void internal_node_insert(Table *table, uint32_t parent_page_num, uint32_t child
     }
     *internal_node_num_key(parent) = original_num_keys + 1;
     void *right_child = get_page(table->pager, right_child_page_num);
+    //if the right_child_max_key is greater than child_max_key
+    //then we need to move the max key of the right child to the internal node
+    //Keys: [20, 40] Children: [Child1, Child2, RightChild] RightChild Max Key: 60
+    // New Child Max Key: 70
+    //Then the internal node key should be 60 not 70  Keys: [20, 40, 60]
     if (child_max_key > get_node_max_key(table->pager, right_child))
+
     {
         *internal_node_child(parent, original_num_keys) = right_child_page_num;
+        //Updates the parent node to store the current right child's page number at the new key slot.
         *internal_node_key(parent, original_num_keys) = get_node_max_key(table->pager, right_child);
+        //Stores the maximum key of the current right child in the parent node at the new key slot.
         *internal_node_right_child(parent) = child_page_num;
+        //Updates the parent’s right child pointer to point to the new child node.
     }
     else
     {
-        for (uint32_t i = original_num_keys; i > 0; i--)
+        //Till the i reaches index shift all the cells to make space for index
+        for (uint32_t i = original_num_keys; i > index; i--)
         {
             void *source = internal_node_cell(parent, i - 1);
             void *destination = internal_node_cell(parent, i);
@@ -2086,6 +2120,8 @@ void internal_node_insert(Table *table, uint32_t parent_page_num, uint32_t child
         }
         *internal_node_child(parent, index) = child_page_num;
         *internal_node_key(parent, index) = child_max_key;
+        // After the shifting, the new child pointer (child_page_num) is added at the calculated index.
+        // The new key (child_max_key) is added to the parent at the same index.
     }
 }
 ```

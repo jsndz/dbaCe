@@ -375,7 +375,7 @@ void print_constants()
 
 uint32_t internal_node_find_child(void *node, uint32_t key)
 {
-
+    // searchs for the key in the internal node and return its index
     uint32_t num_keys = *internal_node_num_key(node);
     uint32_t min_index = 0;
     uint32_t max_index = num_keys;
@@ -585,7 +585,7 @@ void internal_node_insert(Table *table, uint32_t parent_page_num, uint32_t child
     }
     else
     {
-        for (uint32_t i = original_num_keys; i > 0; i--)
+        for (uint32_t i = original_num_keys; i > index; i--)
         {
             void *source = internal_node_cell(parent, i - 1);
             void *destination = internal_node_cell(parent, i);
