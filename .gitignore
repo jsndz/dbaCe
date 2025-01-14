@@ -1,3 +1,3 @@
 .vscode
-db.db 
-db.c
+sql
+db.db
