@@ -1,6 +1,10 @@
-# Building a sqlite with C
+# Building a sqlite clone with C
 
-The Flow goes like this  
+## Description
+
+This project is a simple implementation of a SQLite-like database using C. The architecture consists of a front-end that processes SQL queries and a back-end that manages data storage using a B-tree structure.
+
+The Flow goes like this:
 Cursor->table->pager->file
 Each node is a page
 And each cell(key-value pair) is a row accept for internal node which point to another node
